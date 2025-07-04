@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 15px;
+      }
+      .form-group {
+        margin-bottom: 15px;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+      }
+      input[type="text"] {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-sizing: border-box;
+      }
+      .dropdown {
+        position: relative;
+        width: 100%;
+      }
+      .dropdown-content {
+        position: absolute;
+        background-color: white;
+        width: 100%;
+        max-height: 200px;
+        overflow-y: auto;
+        box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+        z-index: 1;
+        border: 1px solid #ddd;
+        border-top: none;
+        display: none;
+      }
+      .dropdown-item {
+        padding: 10px;
+        cursor: pointer;
+        border-bottom: 1px solid #f0f0f0;
+      }
+      .dropdown-item:hover {
+        background-color: #f5f5f5;
+      }
+      .dropdown-item.selected {
+        background-color: #e3e3e3;
+      }
+      .dropdown-item:last-child {
+        border-bottom: none;
+      }
+      .email-name {
+        font-weight: bold;
+        color: #333;
+      }
+      .email-address {
+        font-size: 12px;
+        color: #666;
+      }
+      button {
+        background-color: #4285f4;
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+        width: 100%;
+      }
+      button:hover {
+        background-color: #357ae8;
+      }
+      button:disabled {
+        background-color: #ccc;
+        cursor: not-allowed;
+      }
+      .message {
+        margin-top: 15px;
+        padding: 10px;
+        border-radius: 4px;
+        display: none;
+      }
+      .success {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+      .error {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+    </style>
+  </head>
+  <body>
+    <h3>1on1 Document Creator</h3>
+    
+    <div class="form-group">
+      <label for="yourName">Your Name</label>
+      <input type="text" id="yourName" placeholder="Loading...">
+    </div>
+    
+    <div class="form-group">
+      <label for="editorEmail">Invite Email Address</label>
+      <div class="dropdown">
+        <input type="text" id="editorEmail" placeholder="Type to search @quipper.com addresses" autocomplete="off">
+        <div id="dropdown" class="dropdown-content"></div>
+      </div>
+    </div>
+    
+    <button id="createBtn" onclick="createDocument()">Create Document</button>
+    
+    <div id="message" class="message"></div>
+    
+    <script>
+      let emailList = [];
+      let selectedIndex = -1;
+      
+      // Load initial data
+      window.onload = function() {
+        // Load your name from Config sheet
+        google.script.run.withSuccessHandler(function(name) {
+          document.getElementById('yourName').value = name || '';
+        }).getYourName();
+        
+        // Load email list
+        google.script.run.withSuccessHandler(function(list) {
+          emailList = list;
+        }).searchUsers('');
+      };
+      
+      // Incremental search
+      document.getElementById('editorEmail').addEventListener('input', function(e) {
+        const query = e.target.value;
+        
+        if (query.length === 0) {
+          hideDropdown();
+          return;
+        }
+        
+        // Search from server
+        google.script.run.withSuccessHandler(function(results) {
+          showDropdown(results);
+        }).searchUsers(query);
+      });
+      
+      // Show dropdown
+      function showDropdown(items) {
+        const dropdown = document.getElementById('dropdown');
+        dropdown.innerHTML = '';
+        selectedIndex = -1;
+        
+        if (items.length === 0) {
+          hideDropdown();
+          return;
+        }
+        
+        items.forEach((item, index) => {
+          const div = document.createElement('div');
+          div.className = 'dropdown-item';
+          div.innerHTML = `
+            <div class="email-name">${item.name}</div>
+            <div class="email-address">${item.email}</div>
+          `;
+          div.onclick = function() {
+            selectEmail(item.email);
+          };
+          dropdown.appendChild(div);
+        });
+        
+        dropdown.style.display = 'block';
+      }
+      
+      // Hide dropdown
+      function hideDropdown() {
+        document.getElementById('dropdown').style.display = 'none';
+        selectedIndex = -1;
+      }
+      
+      // Select email
+      function selectEmail(email) {
+        document.getElementById('editorEmail').value = email;
+        hideDropdown();
+      }
+      
+      // Keyboard navigation
+      document.getElementById('editorEmail').addEventListener('keydown', function(e) {
+        const dropdown = document.getElementById('dropdown');
+        const items = dropdown.getElementsByClassName('dropdown-item');
+        
+        if (items.length === 0) return;
+        
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+          updateSelection(items);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          selectedIndex = Math.max(selectedIndex - 1, 0);
+          updateSelection(items);
+        } else if (e.key === 'Enter' && selectedIndex >= 0) {
+          e.preventDefault();
+          const email = items[selectedIndex].querySelector('.email-address').textContent;
+          selectEmail(email);
+        } else if (e.key === 'Escape') {
+          hideDropdown();
+        }
+      });
+      
+      // Update selection
+      function updateSelection(items) {
+        Array.from(items).forEach((item, index) => {
+          if (index === selectedIndex) {
+            item.classList.add('selected');
+          } else {
+            item.classList.remove('selected');
+          }
+        });
+      }
+      
+      // Create document
+      function createDocument() {
+        const yourName = document.getElementById('yourName').value;
+        const editorEmail = document.getElementById('editorEmail').value;
+        const btn = document.getElementById('createBtn');
+        const msg = document.getElementById('message');
+        
+        if (!yourName || !editorEmail) {
+          showMessage('Please fill in all fields', 'error');
+          return;
+        }
+        
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
+        
+        google.script.run
+          .withSuccessHandler(function(result) {
+            btn.disabled = false;
+            btn.textContent = 'Create Document';
+            showMessage(`Document created successfully! <a href="${result.url}" target="_blank">Open Document</a>`, 'success');
+            document.getElementById('editorEmail').value = '';
+          })
+          .withFailureHandler(function(error) {
+            btn.disabled = false;
+            btn.textContent = 'Create Document';
+            showMessage('Error: ' + error.message, 'error');
+          })
+          .createDocumentFromSidebar(yourName, editorEmail);
+      }
+      
+      // Show message
+      function showMessage(text, type) {
+        const msg = document.getElementById('message');
+        msg.innerHTML = text;
+        msg.className = 'message ' + type;
+        msg.style.display = 'block';
+      }
+      
+      // Click outside to close dropdown
+      document.addEventListener('click', function(e) {
+        if (!e.target.matches('#editorEmail')) {
+          hideDropdown();
+        }
+      });
+    </script>
+  </body>
+</html>

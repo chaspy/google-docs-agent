@@ -14,31 +14,33 @@ function createOneOnOneDoc() {
   // UIを取得
   const ui = SpreadsheetApp.getUi();
   
-  // あなたの名前を入力
-  const yourNameResponse = ui.prompt(
-    '1on1ドキュメント作成',
-    'あなたの名前を入力してください:',
-    ui.ButtonSet.OK_CANCEL
-  );
+  // Configシートから名前を取得、なければ入力を求める
+  let configSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Config');
+  if (!configSheet) {
+    // Configシートが存在しない場合は作成
+    configSheet = createConfigSheet();
+  }
+  let yourName = configSheet.getRange('B1').getValue();
   
-  if (yourNameResponse.getSelectedButton() !== ui.Button.OK) {
-    return;
+  if (!yourName || yourName.toString().trim() === '') {
+    const yourNameResponse = ui.prompt(
+      '1on1ドキュメント作成',
+      'あなたの名前を入力してください:',
+      ui.ButtonSet.OK_CANCEL
+    );
+    
+    if (yourNameResponse.getSelectedButton() !== ui.Button.OK) {
+      return;
+    }
+    
+    yourName = yourNameResponse.getResponseText();
   }
   
-  const yourName = yourNameResponse.getResponseText();
-  
-  // 相手のメールアドレスを入力
-  const emailResponse = ui.prompt(
-    '1on1ドキュメント作成',
-    '招待する相手のメールアドレスを入力してください:',
-    ui.ButtonSet.OK_CANCEL
-  );
-  
-  if (emailResponse.getSelectedButton() !== ui.Button.OK) {
+  // メールアドレスを検索（デフォルト）
+  const editorEmail = selectEmailWithSearch();
+  if (!editorEmail) {
     return;
   }
-  
-  const editorEmail = emailResponse.getResponseText();
   
   // メールアドレスの検証
   if (!isValidEmail(editorEmail)) {
@@ -63,25 +65,33 @@ function createOneOnOneDoc() {
  * ドキュメントを作成して共有
  */
 function createDocument(yourName, editorEmail) {
-  // 日付とパートナー名を取得
-  const date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  const partnerName = editorEmail.split('@')[0];
+  // パートナー名を取得（IDまたはメールアドレスから）
+  const partnerName = getPartnerName(editorEmail);
   
   // ドキュメントのタイトル
-  const title = `1on1 - ${date} - ${partnerName}`;
+  const title = `1on1 ${yourName} / ${partnerName}`;
   
   // ドキュメントを作成
   const doc = DocumentApp.create(title);
   const body = doc.getBody();
   
   // 初期コンテンツを設定
-  body.appendParagraph(`${date} * ${yourName} * ${partnerName}`).setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  const date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy/MM/dd');
+  
+  // タイトル（日付）
+  body.appendParagraph(date).setHeading(DocumentApp.ParagraphHeading.HEADING1);
   body.appendParagraph('');
-  body.appendParagraph('話したいこと').setHeading(DocumentApp.ParagraphHeading.HEADING2);
-  body.appendListItem('');
-  body.appendParagraph('');
-  body.appendParagraph('メモ').setHeading(DocumentApp.ParagraphHeading.HEADING2);
-  body.appendParagraph('');
+  
+  // 各人のセクション（箇条書きスタイルを設定）
+  const partnerItem = body.appendListItem(partnerName);
+  partnerItem.setGlyphType(DocumentApp.GlyphType.BULLET);
+  const partnerSubList = body.appendListItem('何かあれば').setNestingLevel(1);
+  partnerSubList.setGlyphType(DocumentApp.GlyphType.BULLET);
+  
+  const myItem = body.appendListItem(yourName);
+  myItem.setGlyphType(DocumentApp.GlyphType.BULLET);
+  const mySubList = body.appendListItem('あとで書きます！').setNestingLevel(1);
+  mySubList.setGlyphType(DocumentApp.GlyphType.BULLET);
   
   // ドキュメントを保存
   doc.saveAndClose();
@@ -112,7 +122,314 @@ function isValidEmail(email) {
  */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
-  ui.createMenu('1on1ツール')
-    .addItem('新規ドキュメント作成', 'createOneOnOneDoc')
+  ui.createMenu('1on1 Tool')
+    .addItem('Create New Document', 'createOneOnOneDoc')
+    .addItem('Create with Interactive Search', 'showSidebar')
     .addToUi();
+}
+
+/**
+ * メールアドレスリストを取得
+ */
+function searchUsers(query) {
+  try {
+    const users = [];
+    const uniqueEmails = new Set(); // メールアドレスの重複チェック用
+    const sheet = SpreadsheetApp.getActiveSpreadsheet();
+    
+    // 「member」シートから読み込み
+    let memberSheet;
+    try {
+      memberSheet = sheet.getSheetByName('member');
+    } catch (e) {
+      // シートが存在しない場合は作成
+      memberSheet = createMemberListSheet();
+    }
+    
+    if (!memberSheet) {
+      return [];
+    }
+    
+    // データ範囲を取得（A列、J列、M列）
+    const lastRow = memberSheet.getLastRow();
+    if (lastRow < 2) {
+      return [];
+    }
+    
+    // A列（名前）、J列（Googleメールアドレス）、M列（ID）を取得
+    const nameRange = memberSheet.getRange(2, 1, lastRow - 1, 1);  // A列
+    const emailRange = memberSheet.getRange(2, 10, lastRow - 1, 1); // J列
+    const idRange = memberSheet.getRange(2, 13, lastRow - 1, 1);   // M列
+    const names = nameRange.getValues();
+    const emails = emailRange.getValues();
+    const ids = idRange.getValues();
+    
+    // 検索実行
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i][0];
+      const email = emails[i][0];
+      const id = ids[i][0];
+      
+      if (name && email && email.endsWith('@quipper.com')) {
+        // 既に同じメールアドレスが追加されている場合はスキップ
+        if (uniqueEmails.has(email)) {
+          continue;
+        }
+        
+        // クエリでフィルタリング（名前、メールアドレス、IDのいずれかで検索）
+        if (!query || 
+            name.toLowerCase().includes(query.toLowerCase()) || 
+            email.toLowerCase().includes(query.toLowerCase()) ||
+            (id && id.toLowerCase().includes(query.toLowerCase()))) {
+          users.push({
+            name: name + (id ? ` (${id})` : ''), // IDがあれば名前の後ろに表示
+            email: email
+          });
+          uniqueEmails.add(email); // 追加したメールアドレスを記録
+        }
+      }
+    }
+    
+    // 最大20件に制限
+    return users.slice(0, 20);
+    
+  } catch (error) {
+    console.error('ユーザー検索エラー:', error);
+    return [];
+  }
+}
+
+/**
+ * Configシートを作成
+ */
+function createConfigSheet() {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = spreadsheet.insertSheet('Config');
+    
+    // ヘッダーを設定
+    sheet.getRange('A1').setValue('Your Name:');
+    sheet.getRange('B1').setValue(''); // ユーザーが名前を入力する場所
+    
+    // ヘッダーの書式設定
+    sheet.getRange('A1').setFontWeight('bold');
+    sheet.getRange('A1').setBackground('#f3f3f3');
+    
+    // 列幅を調整
+    sheet.setColumnWidth(1, 150);
+    sheet.setColumnWidth(2, 250);
+    
+    // 使い方の説明を追加
+    sheet.getRange('A3').setValue('Instructions:');
+    sheet.getRange('A4').setValue('Enter your name in cell B1');
+    sheet.getRange('A5').setValue('This name will be used when creating 1on1 documents');
+    
+    return sheet;
+  } catch (error) {
+    console.error('Config sheet creation error:', error);
+    return null;
+  }
+}
+
+/**
+ * メンバーリストシートを作成
+ */
+function createMemberListSheet() {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = spreadsheet.insertSheet('member');
+    
+    // ヘッダーを設定
+    sheet.getRange('A1').setValue('Name');
+    sheet.getRange('B1').setValue('Email Address');
+    
+    // ヘッダーの書式設定
+    const headerRange = sheet.getRange('A1:B1');
+    headerRange.setFontWeight('bold');
+    headerRange.setBackground('#f3f3f3');
+    
+    // サンプルデータを追加（A列に名前、J列にメールアドレス）
+    const sampleNames = [
+      ['Taro Yamada'],
+      ['Hanako Suzuki'],
+      ['Ichiro Tanaka']
+    ];
+    
+    const sampleEmails = [
+      ['yamada@example.com'],
+      ['suzuki@example.com'],
+      ['tanaka@example.com']
+    ];
+    
+    sheet.getRange(2, 1, sampleNames.length, 1).setValues(sampleNames);  // A列
+    sheet.getRange(2, 10, sampleEmails.length, 1).setValues(sampleEmails); // J列
+    
+    // 列幅を調整
+    sheet.setColumnWidth(1, 150);
+    sheet.setColumnWidth(2, 250);
+    
+    // 使い方の説明を追加（J列の説明を追加）
+    sheet.getRange('D1').setValue('How to use:');
+    sheet.getRange('D2').setValue('1. Enter names in column A');
+    sheet.getRange('D3').setValue('2. Enter Google email addresses in column J');
+    sheet.getRange('D4').setValue('3. Run "1on1 Tool" → "Create New Document" from the menu');
+    sheet.getRange('D5').setValue('4. Names/emails registered here will be searchable');
+    
+    // J列のヘッダーを追加
+    sheet.getRange('J1').setValue('Google Email').setFontWeight('bold').setBackground('#f3f3f3');
+    
+    return sheet;
+  } catch (error) {
+    console.error('Members sheet creation error:', error);
+    return null;
+  }
+}
+
+/**
+ * サイドバーを表示
+ */
+function showSidebar() {
+  const html = HtmlService.createHtmlOutputFromFile('Sidebar')
+    .setTitle('1on1 Document Creator')
+    .setWidth(300);
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+/**
+ * サイドバーから呼ばれる：自分の名前を取得
+ */
+function getYourName() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet();
+  let configSheet;
+  
+  try {
+    configSheet = sheet.getSheetByName('Config');
+  } catch (e) {
+    configSheet = createConfigSheet();
+  }
+  
+  if (!configSheet) {
+    return '';
+  }
+  
+  return configSheet.getRange('B1').getValue();
+}
+
+/**
+ * サイドバーから呼ばれる：ドキュメント作成
+ */
+function createDocumentFromSidebar(yourName, editorEmail) {
+  // メールアドレスの検証
+  if (!isValidEmail(editorEmail)) {
+    throw new Error('Invalid email address');
+  }
+  
+  // ドキュメントの作成
+  const result = createDocument(yourName, editorEmail);
+  return result;
+}
+
+/**
+ * パートナー名を取得（memberシートから検索）
+ */
+function getPartnerName(editorEmail) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet();
+    const memberSheet = sheet.getSheetByName('member');
+    
+    if (!memberSheet) {
+      // memberシートがない場合はメールアドレスから推測
+      return editorEmail.split('@')[0];
+    }
+    
+    const lastRow = memberSheet.getLastRow();
+    if (lastRow < 2) {
+      return editorEmail.split('@')[0];
+    }
+    
+    // J列（メールアドレス）とM列（ID）を取得
+    const emailRange = memberSheet.getRange(2, 10, lastRow - 1, 1);
+    const idRange = memberSheet.getRange(2, 13, lastRow - 1, 1);
+    const emails = emailRange.getValues();
+    const ids = idRange.getValues();
+    
+    // メールアドレスに一致する行を探す
+    for (let i = 0; i < emails.length; i++) {
+      if (emails[i][0] === editorEmail) {
+        // IDがあればIDを返す、なければメールアドレスから推測
+        return ids[i][0] || editorEmail.split('@')[0];
+      }
+    }
+    
+    // 見つからない場合はメールアドレスから推測
+    return editorEmail.split('@')[0];
+    
+  } catch (error) {
+    console.error('パートナー名取得エラー:', error);
+    return editorEmail.split('@')[0];
+  }
+}
+
+/**
+ * メールアドレスを検索して選択
+ */
+function selectEmailWithSearch() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // 検索キーワードを入力（直接入力も可能）
+  const searchResponse = ui.prompt(
+    'メールアドレス検索',
+    '名前/メールアドレスの一部を入力（例: panko）、または完全なメールアドレスを入力してください:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (searchResponse.getSelectedButton() !== ui.Button.OK) {
+    return null;
+  }
+  
+  const searchKeyword = searchResponse.getResponseText();
+  
+  // 完全なメールアドレスが入力された場合は、そのまま返す
+  if (isValidEmail(searchKeyword)) {
+    return searchKeyword;
+  }
+  
+  // ユーザーを検索
+  const users = searchUsers(searchKeyword);
+  
+  if (users.length === 0) {
+    ui.alert('検索結果', '該当するユーザーが見つかりませんでした。', ui.ButtonSet.OK);
+    return null;
+  }
+  
+  if (users.length === 1) {
+    // 1件のみの場合は自動選択
+    return users[0].email;
+  }
+  
+  // 複数件の場合は選択肢を表示
+  let message = '該当するユーザー:\n\n';
+  users.forEach((user, index) => {
+    message += `${index + 1}. ${user.name} (${user.email})\n`;
+  });
+  message += '\n番号を入力してください:';
+  
+  const selectionResponse = ui.prompt(
+    'ユーザーを選択',
+    message,
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (selectionResponse.getSelectedButton() !== ui.Button.OK) {
+    return null;
+  }
+  
+  const selectedIndex = parseInt(selectionResponse.getResponseText()) - 1;
+  
+  if (selectedIndex >= 0 && selectedIndex < users.length) {
+    return users[selectedIndex].email;
+  } else {
+    ui.alert('エラー', '無効な番号が入力されました。', ui.ButtonSet.OK);
+    return null;
+  }
 }
