@@ -82,16 +82,22 @@ function createDocument(yourName, editorEmail) {
   body.appendParagraph(date).setHeading(DocumentApp.ParagraphHeading.HEADING1);
   body.appendParagraph('');
   
-  // 各人のセクション（箇条書きスタイルを設定）
-  const partnerItem = body.appendListItem(partnerName);
-  partnerItem.setGlyphType(DocumentApp.GlyphType.BULLET);
-  const partnerSubList = body.appendListItem('何かあれば').setNestingLevel(1);
-  partnerSubList.setGlyphType(DocumentApp.GlyphType.BULLET);
+  // 各人のセクション（リストアイテムとして作成）
+  const list1 = body.appendListItem(partnerName);
+  list1.setGlyphType(DocumentApp.GlyphType.BULLET);
   
-  const myItem = body.appendListItem(yourName);
-  myItem.setGlyphType(DocumentApp.GlyphType.BULLET);
-  const mySubList = body.appendListItem('あとで書きます！').setNestingLevel(1);
-  mySubList.setGlyphType(DocumentApp.GlyphType.BULLET);
+  const subList1 = body.appendListItem('何かあれば');
+  subList1.setNestingLevel(1);
+  subList1.setGlyphType(DocumentApp.GlyphType.BULLET);
+  subList1.setListId(list1);
+  
+  const list2 = body.appendListItem(yourName);
+  list2.setGlyphType(DocumentApp.GlyphType.BULLET);
+  
+  const subList2 = body.appendListItem('あとで書きます！');
+  subList2.setNestingLevel(1);
+  subList2.setGlyphType(DocumentApp.GlyphType.BULLET);
+  subList2.setListId(list2);
   
   // ドキュメントを保存
   doc.saveAndClose();

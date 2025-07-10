@@ -118,6 +118,8 @@
     <script>
       let emailList = [];
       let selectedIndex = -1;
+      let searchTimeout;
+      let lastQuery = '';
       
       // Load initial data
       window.onload = function() {
@@ -126,25 +128,45 @@
           document.getElementById('yourName').value = name || '';
         }).getYourName();
         
-        // Load email list
+        // Load all email list once
         google.script.run.withSuccessHandler(function(list) {
           emailList = list;
         }).searchUsers('');
       };
       
-      // Incremental search
+      // Incremental search with debounce
       document.getElementById('editorEmail').addEventListener('input', function(e) {
         const query = e.target.value;
         
         if (query.length === 0) {
           hideDropdown();
+          lastQuery = '';
           return;
         }
         
-        // Search from server
-        google.script.run.withSuccessHandler(function(results) {
-          showDropdown(results);
-        }).searchUsers(query);
+        // Debounce: wait 300ms before searching
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(function() {
+          if (query !== lastQuery) {
+            lastQuery = query;
+            // Show loading state
+            showDropdown([{name: 'Searching...', email: ''}]);
+            
+            // Search from server
+            google.script.run
+              .withSuccessHandler(function(results) {
+                // Only update if this is still the latest query
+                if (query === lastQuery) {
+                  showDropdown(results);
+                }
+              })
+              .withFailureHandler(function(error) {
+                console.error('Search error:', error);
+                hideDropdown();
+              })
+              .searchUsers(query);
+          }
+        }, 300);
       });
       
       // Show dropdown
@@ -166,7 +188,9 @@
             <div class="email-address">${item.email}</div>
           `;
           div.onclick = function() {
-            selectEmail(item.email);
+            if (item.email) {  // Don't select "Searching..." item
+              selectEmail(item.email);
+            }
           };
           dropdown.appendChild(div);
         });
