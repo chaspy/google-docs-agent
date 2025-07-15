@@ -120,9 +120,20 @@
       let selectedIndex = -1;
       let searchTimeout;
       let lastQuery = '';
+      let uiConfig = {};
       
       // Load initial data
       window.onload = function() {
+        // Load UI configuration
+        google.script.run.withSuccessHandler(function(config) {
+          uiConfig = config;
+          // Update UI labels with config values
+          document.querySelector('label[for="yourName"]').textContent = config.nameLabel;
+          document.querySelector('label[for="editorEmail"]').textContent = config.emailLabel;
+          document.getElementById('editorEmail').placeholder = config.emailPlaceholder;
+          document.getElementById('createBtn').textContent = config.createButtonText;
+        }).getUIConfig();
+        
         // Load your name from Config sheet
         google.script.run.withSuccessHandler(function(name) {
           document.getElementById('yourName').value = name || '';
@@ -150,7 +161,7 @@
           if (query !== lastQuery) {
             lastQuery = query;
             // Show loading state
-            showDropdown([{name: 'Searching...', email: ''}]);
+            showDropdown([{name: uiConfig.searchingText || 'Searching...', email: ''}]);
             
             // Search from server
             google.script.run
@@ -253,23 +264,23 @@
         const msg = document.getElementById('message');
         
         if (!yourName || !editorEmail) {
-          showMessage('Please fill in all fields', 'error');
+          showMessage(uiConfig.fieldsError || 'Please fill in all fields', 'error');
           return;
         }
         
         btn.disabled = true;
-        btn.textContent = 'Creating...';
+        btn.textContent = uiConfig.creatingText || 'Creating...';
         
         google.script.run
           .withSuccessHandler(function(result) {
             btn.disabled = false;
-            btn.textContent = 'Create Document';
-            showMessage(`Document created successfully! <a href="${result.url}" target="_blank">Open Document</a>`, 'success');
+            btn.textContent = uiConfig.createButtonText || 'Create Document';
+            showMessage(`${uiConfig.createSuccessMessage || 'Document created successfully!'} <a href="${result.url}" target="_blank">Open Document</a>`, 'success');
             document.getElementById('editorEmail').value = '';
           })
           .withFailureHandler(function(error) {
             btn.disabled = false;
-            btn.textContent = 'Create Document';
+            btn.textContent = uiConfig.createButtonText || 'Create Document';
             showMessage('Error: ' + error.message, 'error');
           })
           .createDocumentFromSidebar(yourName, editorEmail);

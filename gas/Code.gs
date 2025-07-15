@@ -7,6 +7,110 @@
  * 3. 初回は認証が必要
  */
 
+// グローバル設定オブジェクト
+let CONFIG = null;
+
+/**
+ * 設定を読み込む
+ */
+function loadConfig() {
+  if (CONFIG) return CONFIG;
+  
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Config');
+    if (!sheet) {
+      // Configシートがない場合はデフォルト値を返す
+      return getDefaultConfig();
+    }
+    
+    // B列の値を読み込む（B2からB37まで）
+    const values = sheet.getRange('B2:B37').getValues();
+    
+    CONFIG = {
+      // 基本設定
+      yourName: sheet.getRange('B2').getValue() || '',
+      
+      // ドキュメント設定
+      documentTitleFormat: values[3][0] || '1on1 {yourName} / {partnerName}',
+      partnerDefaultText: values[4][0] || '何かあれば',
+      yourDefaultText: values[5][0] || 'あとで書きます！',
+      
+      // UIテキスト設定 - ダイアログ
+      dialogTitle: values[8][0] || '1on1ドキュメント作成',
+      namePrompt: values[9][0] || 'あなたの名前を入力してください:',
+      emailSearchTitle: values[10][0] || 'メールアドレス検索',
+      emailSearchPrompt: values[11][0] || '名前/メールアドレスの一部を入力（例: panko）、または完全なメールアドレスを入力してください:',
+      userSelectTitle: values[12][0] || 'ユーザーを選択',
+      
+      // UIテキスト設定 - メッセージ
+      successTitle: values[14][0] || '成功',
+      successMessage: values[15][0] || 'ドキュメントが作成されました！\n\nURL: {url}\n\n{editorEmail} を編集者として招待しました。',
+      errorTitle: values[16][0] || 'エラー',
+      emailValidationError: values[17][0] || '有効なメールアドレスを入力してください。',
+      documentCreationError: values[18][0] || 'ドキュメントの作成中にエラーが発生しました: ',
+      noResultsMessage: values[19][0] || '該当するユーザーが見つかりませんでした。',
+      invalidSelectionError: values[20][0] || '無効な番号が入力されました。',
+      
+      // メニュー設定
+      menuName: values[22][0] || '1on1 Tool',
+      menuItem1: values[23][0] || 'Create New Document',
+      menuItem2: values[24][0] || 'Create with Interactive Search',
+      
+      // サイドバー設定
+      sidebarTitle: values[27][0] || '1on1 Document Creator',
+      nameLabel: values[28][0] || 'Your Name',
+      emailLabel: values[29][0] || 'Invite Email Address',
+      emailPlaceholder: values[30][0] || 'Type to search @quipper.com addresses',
+      createButtonText: values[31][0] || 'Create Document',
+      creatingText: values[32][0] || 'Creating...',
+      searchingText: values[33][0] || 'Searching...',
+      fieldsError: values[34][0] || 'Please fill in all fields',
+      createSuccessMessage: values[35][0] || 'Document created successfully!'
+    };
+    
+    return CONFIG;
+  } catch (error) {
+    console.error('設定の読み込みエラー:', error);
+    return getDefaultConfig();
+  }
+}
+
+/**
+ * デフォルト設定を取得
+ */
+function getDefaultConfig() {
+  return {
+    yourName: '',
+    documentTitleFormat: '1on1 {yourName} / {partnerName}',
+    partnerDefaultText: '何かあれば',
+    yourDefaultText: 'あとで書きます！',
+    dialogTitle: '1on1ドキュメント作成',
+    namePrompt: 'あなたの名前を入力してください:',
+    emailSearchTitle: 'メールアドレス検索',
+    emailSearchPrompt: '名前/メールアドレスの一部を入力（例: panko）、または完全なメールアドレスを入力してください:',
+    userSelectTitle: 'ユーザーを選択',
+    successTitle: '成功',
+    successMessage: 'ドキュメントが作成されました！\n\nURL: {url}\n\n{editorEmail} を編集者として招待しました。',
+    errorTitle: 'エラー',
+    emailValidationError: '有効なメールアドレスを入力してください。',
+    documentCreationError: 'ドキュメントの作成中にエラーが発生しました: ',
+    noResultsMessage: '該当するユーザーが見つかりませんでした。',
+    invalidSelectionError: '無効な番号が入力されました。',
+    menuName: '1on1 Tool',
+    menuItem1: 'Create New Document',
+    menuItem2: 'Create with Interactive Search',
+    sidebarTitle: '1on1 Document Creator',
+    nameLabel: 'Your Name',
+    emailLabel: 'Invite Email Address',
+    emailPlaceholder: 'Type to search @quipper.com addresses',
+    createButtonText: 'Create Document',
+    creatingText: 'Creating...',
+    searchingText: 'Searching...',
+    fieldsError: 'Please fill in all fields',
+    createSuccessMessage: 'Document created successfully!'
+  };
+}
+
 /**
  * メイン関数 - 1on1ドキュメントを作成
  */
@@ -14,18 +118,23 @@ function createOneOnOneDoc() {
   // UIを取得
   const ui = SpreadsheetApp.getUi();
   
+  // 設定を読み込む
+  const config = loadConfig();
+  
   // Configシートから名前を取得、なければ入力を求める
   let configSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Config');
   if (!configSheet) {
     // Configシートが存在しない場合は作成
     configSheet = createConfigSheet();
+    CONFIG = null; // 設定をリセット
+    config = loadConfig(); // 再読み込み
   }
-  let yourName = configSheet.getRange('B1').getValue();
+  let yourName = config.yourName;
   
   if (!yourName || yourName.toString().trim() === '') {
     const yourNameResponse = ui.prompt(
-      '1on1ドキュメント作成',
-      'あなたの名前を入力してください:',
+      config.dialogTitle,
+      config.namePrompt,
       ui.ButtonSet.OK_CANCEL
     );
     
@@ -44,7 +153,7 @@ function createOneOnOneDoc() {
   
   // メールアドレスの検証
   if (!isValidEmail(editorEmail)) {
-    ui.alert('エラー', '有効なメールアドレスを入力してください。', ui.ButtonSet.OK);
+    ui.alert(config.errorTitle, config.emailValidationError, ui.ButtonSet.OK);
     return;
   }
   
@@ -53,11 +162,13 @@ function createOneOnOneDoc() {
     const result = createDocument(yourName, editorEmail);
     
     // 成功メッセージ
-    const message = `ドキュメントが作成されました！\n\nURL: ${result.url}\n\n${editorEmail} を編集者として招待しました。`;
-    ui.alert('成功', message, ui.ButtonSet.OK);
+    const message = config.successMessage
+      .replace('{url}', result.url)
+      .replace('{editorEmail}', editorEmail);
+    ui.alert(config.successTitle, message, ui.ButtonSet.OK);
     
   } catch (error) {
-    ui.alert('エラー', 'ドキュメントの作成中にエラーが発生しました: ' + error.toString(), ui.ButtonSet.OK);
+    ui.alert(config.errorTitle, config.documentCreationError + error.toString(), ui.ButtonSet.OK);
   }
 }
 
@@ -65,11 +176,16 @@ function createOneOnOneDoc() {
  * ドキュメントを作成して共有
  */
 function createDocument(yourName, editorEmail) {
+  // 設定を読み込む
+  const config = loadConfig();
+  
   // パートナー名を取得（IDまたはメールアドレスから）
   const partnerName = getPartnerName(editorEmail);
   
-  // ドキュメントのタイトル
-  const title = `1on1 ${yourName} / ${partnerName}`;
+  // ドキュメントのタイトル（設定から取得）
+  const title = config.documentTitleFormat
+    .replace('{yourName}', yourName)
+    .replace('{partnerName}', partnerName);
   
   // ドキュメントを作成
   const doc = DocumentApp.create(title);
@@ -86,7 +202,7 @@ function createDocument(yourName, editorEmail) {
   const list1 = body.appendListItem(partnerName);
   list1.setGlyphType(DocumentApp.GlyphType.BULLET);
   
-  const subList1 = body.appendListItem('何かあれば');
+  const subList1 = body.appendListItem(config.partnerDefaultText);
   subList1.setNestingLevel(1);
   subList1.setGlyphType(DocumentApp.GlyphType.BULLET);
   subList1.setListId(list1);
@@ -94,7 +210,7 @@ function createDocument(yourName, editorEmail) {
   const list2 = body.appendListItem(yourName);
   list2.setGlyphType(DocumentApp.GlyphType.BULLET);
   
-  const subList2 = body.appendListItem('あとで書きます！');
+  const subList2 = body.appendListItem(config.yourDefaultText);
   subList2.setNestingLevel(1);
   subList2.setGlyphType(DocumentApp.GlyphType.BULLET);
   subList2.setListId(list2);
@@ -128,9 +244,10 @@ function isValidEmail(email) {
  */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
-  ui.createMenu('1on1 Tool')
-    .addItem('Create New Document', 'createOneOnOneDoc')
-    .addItem('Create with Interactive Search', 'showSidebar')
+  const config = loadConfig();
+  ui.createMenu(config.menuName)
+    .addItem(config.menuItem1, 'createOneOnOneDoc')
+    .addItem(config.menuItem2, 'showSidebar')
     .addToUi();
 }
 
@@ -213,22 +330,128 @@ function createConfigSheet() {
     const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = spreadsheet.insertSheet('Config');
     
-    // ヘッダーを設定
-    sheet.getRange('A1').setValue('Your Name:');
-    sheet.getRange('B1').setValue(''); // ユーザーが名前を入力する場所
+    // ===== 基本設定セクション =====
+    sheet.getRange('A1').setValue('基本設定');
+    sheet.getRange('A1').setFontWeight('bold').setFontSize(14).setBackground('#4285f4').setFontColor('#ffffff');
+    sheet.getRange('A1:B1').merge();
     
-    // ヘッダーの書式設定
-    sheet.getRange('A1').setFontWeight('bold');
-    sheet.getRange('A1').setBackground('#f3f3f3');
+    sheet.getRange('A2').setValue('Your Name:');
+    sheet.getRange('B2').setValue(''); // ユーザーが名前を入力する場所
+    
+    // ===== ドキュメント設定セクション =====
+    sheet.getRange('A4').setValue('ドキュメント設定');
+    sheet.getRange('A4').setFontWeight('bold').setFontSize(14).setBackground('#4285f4').setFontColor('#ffffff');
+    sheet.getRange('A4:B4').merge();
+    
+    sheet.getRange('A5').setValue('ドキュメントタイトル形式:');
+    sheet.getRange('B5').setValue('1on1 {yourName} / {partnerName}');
+    
+    sheet.getRange('A6').setValue('相手のデフォルトテキスト:');
+    sheet.getRange('B6').setValue('何かあれば');
+    
+    sheet.getRange('A7').setValue('自分のデフォルトテキスト:');
+    sheet.getRange('B7').setValue('あとで書きます！');
+    
+    // ===== UIテキスト設定セクション =====
+    sheet.getRange('A9').setValue('UIテキスト設定');
+    sheet.getRange('A9').setFontWeight('bold').setFontSize(14).setBackground('#4285f4').setFontColor('#ffffff');
+    sheet.getRange('A9:B9').merge();
+    
+    // ダイアログ関連
+    sheet.getRange('A10').setValue('ドキュメント作成ダイアログタイトル:');
+    sheet.getRange('B10').setValue('1on1ドキュメント作成');
+    
+    sheet.getRange('A11').setValue('名前入力プロンプト:');
+    sheet.getRange('B11').setValue('あなたの名前を入力してください:');
+    
+    sheet.getRange('A12').setValue('メール検索ダイアログタイトル:');
+    sheet.getRange('B12').setValue('メールアドレス検索');
+    
+    sheet.getRange('A13').setValue('メール検索プロンプト:');
+    sheet.getRange('B13').setValue('名前/メールアドレスの一部を入力（例: panko）、または完全なメールアドレスを入力してください:');
+    
+    sheet.getRange('A14').setValue('ユーザー選択ダイアログタイトル:');
+    sheet.getRange('B14').setValue('ユーザーを選択');
+    
+    // メッセージ関連
+    sheet.getRange('A16').setValue('成功メッセージタイトル:');
+    sheet.getRange('B16').setValue('成功');
+    
+    sheet.getRange('A17').setValue('成功メッセージ本文:');
+    sheet.getRange('B17').setValue('ドキュメントが作成されました！\n\nURL: {url}\n\n{editorEmail} を編集者として招待しました。');
+    
+    sheet.getRange('A18').setValue('エラーメッセージタイトル:');
+    sheet.getRange('B18').setValue('エラー');
+    
+    sheet.getRange('A19').setValue('メール検証エラー:');
+    sheet.getRange('B19').setValue('有効なメールアドレスを入力してください。');
+    
+    sheet.getRange('A20').setValue('ドキュメント作成エラー:');
+    sheet.getRange('B20').setValue('ドキュメントの作成中にエラーが発生しました: ');
+    
+    sheet.getRange('A21').setValue('検索結果なしメッセージ:');
+    sheet.getRange('B21').setValue('該当するユーザーが見つかりませんでした。');
+    
+    sheet.getRange('A22').setValue('無効な選択エラー:');
+    sheet.getRange('B22').setValue('無効な番号が入力されました。');
+    
+    // メニュー関連
+    sheet.getRange('A24').setValue('メニュー名:');
+    sheet.getRange('B24').setValue('1on1 Tool');
+    
+    sheet.getRange('A25').setValue('メニュー項目1:');
+    sheet.getRange('B25').setValue('Create New Document');
+    
+    sheet.getRange('A26').setValue('メニュー項目2:');
+    sheet.getRange('B26').setValue('Create with Interactive Search');
+    
+    // ===== サイドバー設定セクション =====
+    sheet.getRange('A28').setValue('サイドバー設定');
+    sheet.getRange('A28').setFontWeight('bold').setFontSize(14).setBackground('#4285f4').setFontColor('#ffffff');
+    sheet.getRange('A28:B28').merge();
+    
+    sheet.getRange('A29').setValue('サイドバータイトル:');
+    sheet.getRange('B29').setValue('1on1 Document Creator');
+    
+    sheet.getRange('A30').setValue('名前ラベル:');
+    sheet.getRange('B30').setValue('Your Name');
+    
+    sheet.getRange('A31').setValue('メールアドレスラベル:');
+    sheet.getRange('B31').setValue('Invite Email Address');
+    
+    sheet.getRange('A32').setValue('メール検索プレースホルダー:');
+    sheet.getRange('B32').setValue('Type to search @quipper.com addresses');
+    
+    sheet.getRange('A33').setValue('作成ボタンテキスト:');
+    sheet.getRange('B33').setValue('Create Document');
+    
+    sheet.getRange('A34').setValue('作成中テキスト:');
+    sheet.getRange('B34').setValue('Creating...');
+    
+    sheet.getRange('A35').setValue('検索中テキスト:');
+    sheet.getRange('B35').setValue('Searching...');
+    
+    sheet.getRange('A36').setValue('フィールド入力エラー:');
+    sheet.getRange('B36').setValue('Please fill in all fields');
+    
+    sheet.getRange('A37').setValue('作成成功メッセージ:');
+    sheet.getRange('B37').setValue('Document created successfully!');
+    
+    // 書式設定
+    sheet.getRange('A2:A37').setFontWeight('bold');
+    sheet.getRange('A2:A37').setBackground('#f3f3f3');
     
     // 列幅を調整
-    sheet.setColumnWidth(1, 150);
-    sheet.setColumnWidth(2, 250);
+    sheet.setColumnWidth(1, 300);
+    sheet.setColumnWidth(2, 400);
     
     // 使い方の説明を追加
-    sheet.getRange('A3').setValue('Instructions:');
-    sheet.getRange('A4').setValue('Enter your name in cell B1');
-    sheet.getRange('A5').setValue('This name will be used when creating 1on1 documents');
+    sheet.getRange('D1').setValue('使い方:');
+    sheet.getRange('D1').setFontWeight('bold').setFontSize(12);
+    sheet.getRange('D2').setValue('1. B2セルにあなたの名前を入力');
+    sheet.getRange('D3').setValue('2. 各設定項目を必要に応じて変更');
+    sheet.getRange('D4').setValue('3. {yourName}と{partnerName}は自動的に置換されます');
+    sheet.getRange('D5').setValue('4. 変更後は画面をリロードしてください');
     
     return sheet;
   } catch (error) {
@@ -295,8 +518,9 @@ function createMemberListSheet() {
  * サイドバーを表示
  */
 function showSidebar() {
+  const config = loadConfig();
   const html = HtmlService.createHtmlOutputFromFile('Sidebar')
-    .setTitle('1on1 Document Creator')
+    .setTitle(config.sidebarTitle)
     .setWidth(300);
   SpreadsheetApp.getUi().showSidebar(html);
 }
@@ -305,20 +529,25 @@ function showSidebar() {
  * サイドバーから呼ばれる：自分の名前を取得
  */
 function getYourName() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet();
-  let configSheet;
-  
-  try {
-    configSheet = sheet.getSheetByName('Config');
-  } catch (e) {
-    configSheet = createConfigSheet();
-  }
-  
-  if (!configSheet) {
-    return '';
-  }
-  
-  return configSheet.getRange('B1').getValue();
+  const config = loadConfig();
+  return config.yourName;
+}
+
+/**
+ * サイドバーから呼ばれる：UI設定を取得
+ */
+function getUIConfig() {
+  const config = loadConfig();
+  return {
+    nameLabel: config.nameLabel,
+    emailLabel: config.emailLabel,
+    emailPlaceholder: config.emailPlaceholder,
+    createButtonText: config.createButtonText,
+    creatingText: config.creatingText,
+    searchingText: config.searchingText,
+    fieldsError: config.fieldsError,
+    createSuccessMessage: config.createSuccessMessage
+  };
 }
 
 /**
@@ -381,11 +610,12 @@ function getPartnerName(editorEmail) {
  */
 function selectEmailWithSearch() {
   const ui = SpreadsheetApp.getUi();
+  const config = loadConfig();
   
   // 検索キーワードを入力（直接入力も可能）
   const searchResponse = ui.prompt(
-    'メールアドレス検索',
-    '名前/メールアドレスの一部を入力（例: panko）、または完全なメールアドレスを入力してください:',
+    config.emailSearchTitle,
+    config.emailSearchPrompt,
     ui.ButtonSet.OK_CANCEL
   );
   
@@ -404,7 +634,7 @@ function selectEmailWithSearch() {
   const users = searchUsers(searchKeyword);
   
   if (users.length === 0) {
-    ui.alert('検索結果', '該当するユーザーが見つかりませんでした。', ui.ButtonSet.OK);
+    ui.alert(config.errorTitle, config.noResultsMessage, ui.ButtonSet.OK);
     return null;
   }
   
@@ -421,7 +651,7 @@ function selectEmailWithSearch() {
   message += '\n番号を入力してください:';
   
   const selectionResponse = ui.prompt(
-    'ユーザーを選択',
+    config.userSelectTitle,
     message,
     ui.ButtonSet.OK_CANCEL
   );
@@ -435,7 +665,7 @@ function selectEmailWithSearch() {
   if (selectedIndex >= 0 && selectedIndex < users.length) {
     return users[selectedIndex].email;
   } else {
-    ui.alert('エラー', '無効な番号が入力されました。', ui.ButtonSet.OK);
+    ui.alert(config.errorTitle, config.invalidSelectionError, ui.ButtonSet.OK);
     return null;
   }
 }
